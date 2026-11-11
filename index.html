@@ -1,0 +1,1076 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scrap Haul</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #0b0d14; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f1ece2; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 4px #000c; font-weight: 700; }
+  #quota { top: max(12px, env(safe-area-inset-top)); left: 16px; width: min(260px, calc(100vw - 150px)); }
+  #quota b { display: block; font-size: 20px; }
+  #quota .bar { height: 8px; margin-top: 5px; border-radius: 4px; background: #ffffff22; overflow: hidden; }
+  #quota .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ffb340, #ffe066); transition: width .4s; }
+  #quota .bar i.met { background: linear-gradient(90deg, #4fd27a, #a6ff9e); }
+  #clock { margin-top: 6px; font-size: 14px; opacity: .9; }
+  #clock.late { color: #ff6a5a; opacity: 1; }
+  #team { top: max(12px, env(safe-area-inset-top)); right: 16px; font-size: 13px; text-align: right; line-height: 1.6; }
+  #team .me { color: #ffb340; } #team .dead { opacity: .5; text-decoration: line-through; }
+  #big { inset: 0; display: grid; place-items: center; text-align: center; font-size: clamp(24px, 6vw, 42px); padding: 0 16px; }
+  #big small { display: block; font-size: 16px; opacity: .85; font-weight: 600; }
+  #msg { left: 0; right: 0; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 30px); text-align: center; font-size: 16px; padding: 0 16px; }
+  #toast { left: 0; right: 0; top: 30%; text-align: center; font-size: 26px; color: #ffe066; opacity: 0; transition: opacity .3s; }
+  #toast.on { opacity: 1; }
+  #net { bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; opacity: .7; white-space: nowrap; }
+  #fear { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 40%, #b0101a 125%); }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #0007; }
+  #over[hidden], .pad[hidden], #stick[hidden], #over [hidden] { display: none; }
+  .card { width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #171a24; border: 1px solid #ffffff22; box-sizing: border-box; text-align: center; }
+  .card h2 { margin: 0 0 4px; font-size: 26px; }
+  .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffb340; text-align: left; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
+  .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card p { margin: 6px 0 0; font-size: 14px; opacity: .85; }
+  button.go { margin-top: 16px; width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ffb340; color: #2a1600; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  .pad { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: flex-end; }
+  .pad button { width: 70px; height: 70px; border-radius: 50%; border: 2px solid #ffffff77; background: #ffffff1a; color: #fff; font: 800 13px system-ui, sans-serif; touch-action: none; }
+  .pad button[data-k="grab"] { width: 84px; height: 84px; border-color: #ffb340; background: #ffb34033; }
+  .pad button.on { background: #ffb34066; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid #ffffff55; background: #ffffff12; pointer-events: none; }
+  #stick i { position: absolute; left: 35px; top: 35px; width: 40px; height: 40px; border-radius: 50%; background: #ffffff66; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+<script type="importmap">{ "imports": { "three": "./libs/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="fear"></div>
+<div class="hud" id="quota"><b id="quotaText"></b><div class="bar"><i id="quotaBar"></i></div><div id="clock"></div></div>
+<div class="hud" id="team"></div>
+<div class="hud" id="big"></div>
+<div class="hud" id="toast"></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="net">Connecting…</div>
+<div id="stick" hidden><i></i></div>
+<div class="pad" id="pad" hidden><button data-k="light" class="on">LIGHT</button><button data-k="run">RUN</button><button data-k="grab">GRAB</button></div>
+<div id="over" hidden><div class="card">
+  <h2 id="overTitle"></h2><p id="overLine"></p>
+  <div id="overBoard"><h3>Most scrap hauled</h3><ol id="board"><li>Loading…</li></ol>
+  <button class="go" id="again">Play again</button></div>
+  <p id="next"></p>
+</div></div>
+<script type="module">
+/* ═══ SCRAP HAUL · a Multiplayer Agent starter ═════════════════════════════════════════
+ * Scavenge a dead facility. Make quota before the ship leaves at dusk. Co-op, 1–4 players;
+ * bot crewmates fill empty seats.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ speeds, the day clock, the quota, the scrap, the three monsters, the map
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   MAP ........... reading CONFIG.map: walls, paths (for monsters and bots), line of sight
+ *   SCENE ......... floor, walls, crates, the ship, lamps, scrap models
+ *   CREATURES ..... the crew model, the three monster models, flashlights
+ *   DAY (HOST) .... phases (land, day, leave, over), the quota, scrap pickups and banking,
+ *                   deaths, the monsters and the bot crewmates. Only the host writes these.
+ *   ME ............ walking, aiming, grabbing and dropping. Each player writes only its own.
+ *   HUD & RESULTS . quota bar, clock, team, prompts, the day card, the results, leaderboard
+ *   INPUT & SOUND . keyboard, mouse, touch stick and buttons, WebAudio effects
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each player writes its OWN entity: `p` (one packed JSON field: position, facing,
+ *     flashlight, noise, the day it is for) about 12 times a second, `hb` (heartbeat) once a
+ *     second, and `n`/`c` (name, color) once.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. Only the host writes the shared fields:
+ *       `game` {id, v, day, quota, banked, total, phase, timers, seed, items, dead}: ONE JSON
+ *              field, written on every change; v only goes up
+ *       `mons` the monsters [{i, k, x, z, h, s}], 10 times a second
+ *       `bots` the bot crewmates, 10 times a second
+ *     The host's browser runs the monsters, the day clock and the bots. A new host adopts
+ *     all three from state and carries on.
+ *   - Intents to the host: "grab" {i} (the host checks you are next to it and free-handed),
+ *     "drop" {x, z} (puts what you carry on the floor: the noise draws the Hound), "again".
+ *     Banking scrap at the ship and dying are decided by the host from everyone's positions.
+ *     A dead player's scrap drops where they fell.
+ *   - A new day starts when the host bumps game.day; a new run when it bumps game.id. Every
+ *     client then puts its player back at the ship.
+ *   - ?attract plays offline with bots only (the preview video is recorded from it).
+ *   - Leaderboard "scrap-hauled": the run's total scrap value, submitted when you get fired.
+ */
+import * as THREE from "three";
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  seats: 4,               // bot crewmates fill the crew up to this many
+  dayMs: 150000,          // ms from landing until dusk, when the ship leaves
+  landMs: 3500,           // ms of "Day N" at the start of a day (monsters still asleep)
+  leaveMs: 5500,          // ms the "ship leaving" card shows between days
+  resultsMs: 15000,       // ms the results show after you get fired, before a new run
+  warnMs: 30000,          // ms before dusk when the siren sounds
+  quota: 150,             // day 1 quota, in $
+  quotaGrowth: 1.5,       // each day's quota is this many times the last one
+  scrapFirst: 14,         // pieces of scrap on day 1 ...
+  scrapPerDay: 2,         // ... this many more each day ...
+  valueGrowth: 0.12,      // ... and each piece is worth 12% more each day
+  walk: 4.2, run: 6.8,    // your speeds, units/s (running is loud)
+  heavySlow: 0.6,         // carrying something heavy: speed × this (and your steps are louder)
+  lightSlow: 0.9,         // carrying something light: speed × this
+  botWalk: 3.7, botRun: 6.0, // bot crewmates
+  radius: 0.35,           // how wide a person is, for walls
+  reach: 1.7,             // how close you get to grab scrap
+  bankReach: 3.2,         // how close to the ship's ramp scrap counts as banked
+  ambient: 1.0,           // how much you see without a flashlight at noon ...
+  duskDark: 0.4,          // ... and how much of that fades by dusk
+  light: { range: 17, angle: 0.62, power: 70 },
+  shadows: true,          // your own flashlight casts wall shadows
+  // The Watcher: moves only while no flashlight is on it. The Hound: blind, rushes at noise and
+  // only bites what moves.
+  // The Crawler: patrols and chases what it sees (flashlights are easy to see).
+  watcher: { speed: 4.4, wander: 1.6, notice: 18, freezeRange: 16, freezeAngle: 0.6 },
+  hound: { wander: 1.7, rush: 6.2, hearRun: 12, hearWalk: 3.5, hearHeavy: 6, hearDrop: 16, listenMs: 2200 },
+  crawler: { patrol: 2.2, chase: 4.7, sight: 10, sightDark: 3.5, giveUpMs: 3000 },
+  catch: 1.0,             // how close a monster gets to kill
+  wakeMs: 8000,           // ms after landing before the monsters start moving
+  eatMs: 2500,            // ms a monster stops after a kill
+  monstersByDay: ["WH", "WHC", "WHCH", "WWHCH"], // W Watcher, H Hound, C Crawler; the last line repeats
+  board: "scrap-hauled",
+  tile: 2,                // world units per map character
+  // The facility. # wall, . floor, x crate, s a place scrap can be, o outdoor ground,
+  // % fence, P the ship (solid), S the ship's ramp (bank scrap here, the crew lands here),
+  // W H C where those monsters wake up.
+  map: [
+    "%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "%ooooooooooPPPPPooooooooxo%",
+    "%oxooooooooPPPPPoooooooooo%",
+    "%oooooooooooSSSoooooooooox%",
+    "%ooooooooooooooooooooooooo%",
+    "######..#####...#####..####",
+    "#x..s...#.....x.#.....s..x#",
+    "#.........................#",
+    "#s.....x#s.....s#x......s.#",
+    "####.########.########.####",
+    "#s.........x.....x.......s#",
+    "#...##...s.......s...##...#",
+    "#...##.......W.......##...#",
+    "#s.......x.........x.....s#",
+    "###.#######.########.######",
+    "#x..s.#s......#..x.....C..#",
+    "#.....#...x...#..........s#",
+    "#..H...........x....s.....#",
+    "#.....#.......#..........x#",
+    "#s...x#s.....s#s......x..s#",
+    "###########################",
+  ],
+};
+// The scrap: name, value range in $, heavy or not, which model to draw.
+const KINDS = [
+  { name: "Brass cog", lo: 8, hi: 22, heavy: false, shape: "cog", color: "#e0a92a" },
+  { name: "Old battery", lo: 10, hi: 26, heavy: false, shape: "battery", color: "#4fb8ff" },
+  { name: "Desk lamp", lo: 14, hi: 30, heavy: false, shape: "lamp", color: "#ffd36b" },
+  { name: "Toy robot", lo: 18, hi: 36, heavy: false, shape: "robot", color: "#ff7a59" },
+  { name: "Gold mug", lo: 26, hi: 44, heavy: false, shape: "mug", color: "#ffcc33" },
+  { name: "Engine block", lo: 55, hi: 90, heavy: true, shape: "engine", color: "#a6b0bb" },
+  { name: "Chem barrel", lo: 40, hi: 70, heavy: true, shape: "barrel", color: "#49c26a" },
+  { name: "Iron safe", lo: 70, hi: 120, heavy: true, shape: "safe", color: "#7f8da0" },
+];
+const MON_NAMES = { W: "the Watcher", H: "the Hound", C: "the Crawler" };
+const BOT_NAMES = ["Kit", "Moss", "Juno", "Pip", "Rook", "Ivy"];
+const COLORS = ["#ff9f1c", "#4da6ff", "#ff6fb5", "#52d273", "#e8e05a", "#c77dff"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'scrap-haul',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const PARAMS = new URLSearchParams(location.search), ATTRACT = PARAMS.has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never mutate what this returns). */
+function shared(key, fb) { const raw = S.shared[key], m = memo.get(key); if (m && m.raw === raw) return m.v; const v = parse(raw, fb); memo.set(key, { raw, v }); return v; }
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+let wakeHold = 0, lastFrameAt = 0; // a tab whose frames stopped (frozen, or in the background) doesn't act as host, nor for 700ms after it wakes (see frame())
+const isHost = () => livePlayers()[0] === net.sessionId && performance.now() >= wakeHold && !(lastFrameAt && performance.now() - lastFrameAt > 1000);
+
+// ── MAP ─────────────────────────────────────────────────────────────────────────────
+if (ATTRACT) {
+  Object.assign(CONFIG, { dayMs: 32000, landMs: 400, leaveMs: 2200, resultsMs: 2500, wakeMs: 1500, quota: 60, quotaGrowth: 1.3, ambient: 1.6, duskDark: 0.15, monstersByDay: ["WHC"] });
+  Object.assign(CONFIG.hound, { hearWalk: 5 });
+}
+const MAP = CONFIG.map, MH = MAP.length, MW = MAP[0].length, TS = CONFIG.tile;
+const cell = (cx, cz) => (MAP[cz] && MAP[cz][cx]) || "#";
+const solid = (cx, cz) => "#x%P".includes(cell(cx, cz));
+const toCell = (v) => Math.floor(v / TS);
+const center = (cx, cz) => ({ x: (cx + 0.5) * TS, z: (cz + 0.5) * TS });
+const find = (ch) => MAP.flatMap((row, z) => [...row].flatMap((c, x) => (c === ch ? [center(x, z)] : [])));
+const RAMP = find("S")[1], SHIP = (() => { const p = find("P"); return { x: p.reduce((s, q) => s + q.x, 0) / p.length, z: p.reduce((s, q) => s + q.z, 0) / p.length }; })();
+const SCRAP_SPOTS = find("s"), MON_STARTS = { W: find("W")[0], H: find("H")[0], C: find("C")[0] };
+const INDOOR = MAP.flatMap((row, z) => [...row].flatMap((c, x) => (".sWHC".includes(c) ? [center(x, z)] : [])));
+const wallAt = (x, z) => solid(toCell(x), toCell(z));
+function dist(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
+const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const r1 = (v) => Math.round(v * 100) / 100;
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+/** Walls block sight; crates don't (they're low). */
+function canSee(a, b) {
+  const d = dist(a, b), n = Math.ceil(d / 0.3);
+  for (let i = 1; i < n; i++) { const t = i / n; if (cell(toCell(a.x + (b.x - a.x) * t), toCell(a.z + (b.z - a.z) * t)) === "#") return false; }
+  return true;
+}
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+/** A walkable route from a to b as tile centres (ending at b), or [] if there is none. */
+function route(a, b) {
+  const sx = toCell(a.x), sz = toCell(a.z), gx = toCell(b.x), gz = toCell(b.z), goal = gx + gz * MW;
+  if (solid(gx, gz)) return [];
+  const prev = new Int32Array(MW * MH).fill(-1), q = [sx + sz * MW];
+  prev[q[0]] = q[0];
+  for (let h = 0; h < q.length && prev[goal] < 0; h++) {
+    const k = q[h], x = k % MW, z = (k / MW) | 0;
+    for (const [dx, dz] of DIRS) {
+      const nx = x + dx, nz = z + dz, n = nx + nz * MW;
+      if (solid(nx, nz) || prev[n] >= 0 || (dx && dz && (solid(x + dx, z) || solid(x, z + dz)))) continue;
+      prev[n] = k; q.push(n);
+    }
+  }
+  if (prev[goal] < 0) return [];
+  const out = [{ x: b.x, z: b.z }];
+  for (let k = prev[goal]; k !== prev[k]; k = prev[k]) out.unshift(center(k % MW, (k / MW) | 0));
+  return out;
+}
+/** Walk an agent ({x, z, h, path}) along its path. False when it has nowhere to go. */
+function follow(a, speed, dt) {
+  const p = a.path[0];
+  if (!p) return false;
+  const dx = p.x - a.x, dz = p.z - a.z, d = Math.hypot(dx, dz), step = speed * dt;
+  if (d <= step) { a.x = p.x; a.z = p.z; a.path.shift(); } else { a.x += (dx / d) * step; a.z += (dz / d) * step; }
+  if (d > 0.01) a.h += angDiff(Math.atan2(dx, dz), a.h) * Math.min(1, dt * 8);
+  return true;
+}
+/** Slide a person along walls. */
+function moveBody(o, dx, dz) {
+  const r = CONFIG.radius, hit = (x, z) => wallAt(x - r, z - r) || wallAt(x + r, z - r) || wallAt(x - r, z + r) || wallAt(x + r, z + r);
+  if (!hit(o.x + dx, o.z)) o.x += dx;
+  if (!hit(o.x, o.z + dz)) o.z += dz;
+}
+
+// ── SCENE ───────────────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+renderer.shadowMap.enabled = CONFIG.shadows;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const SKY_NOON = new THREE.Color("#141a28"), SKY_DUSK = new THREE.Color("#2a1226");
+scene.background = SKY_NOON.clone();
+scene.fog = new THREE.Fog("#141a28", 22, 50);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
+function fit() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+const sky = new THREE.HemisphereLight("#8fa3d8", "#2a2018", CONFIG.ambient); scene.add(sky);
+
+function canvasTex(w, h, paint, rx, ry) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  if (rx) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); }
+  return t;
+}
+const noise = (c, w, h, n, a) => { for (let i = 0; i < n; i++) { c.fillStyle = `rgba(0,0,0,${Math.random() * a})`; c.fillRect(Math.random() * w, Math.random() * h, 3, 3); } };
+const OUT_ROWS = MAP.findIndex((r) => r.startsWith("#")); // the landing field is above this row, the facility below
+const floorTex = canvasTex(128, 128, (c, w, h) => {
+  c.fillStyle = "#5d6270"; c.fillRect(0, 0, w, h); c.fillStyle = "#545866"; c.fillRect(0, 0, 64, 64); c.fillRect(64, 64, 64, 64);
+  noise(c, w, h, 900, 0.25); c.strokeStyle = "#0005"; c.lineWidth = 2; c.strokeRect(0, 0, w, h);
+  c.fillStyle = "#c9a22a55"; c.fillRect(0, 60, 10, 8); // a scuffed paint mark
+}, MW, MH - OUT_ROWS);
+const indoor = new THREE.Mesh(new THREE.PlaneGeometry(MW * TS, (MH - OUT_ROWS) * TS), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85 }));
+indoor.rotation.x = -Math.PI / 2; indoor.position.set((MW * TS) / 2, 0, ((MH + OUT_ROWS) * TS) / 2); indoor.receiveShadow = true; scene.add(indoor);
+const groundTex = canvasTex(128, 128, (c, w, h) => { c.fillStyle = "#4b4537"; c.fillRect(0, 0, w, h); noise(c, w, h, 1400, 0.35); }, MW / 2 + 10, OUT_ROWS / 2 + 10);
+const outdoor = new THREE.Mesh(new THREE.PlaneGeometry(MW * TS + 40, OUT_ROWS * TS + 40), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1 }));
+outdoor.rotation.x = -Math.PI / 2; outdoor.position.set((MW * TS) / 2, -0.01, (OUT_ROWS * TS - 40) / 2); outdoor.receiveShadow = true; scene.add(outdoor);
+// Painted landing marks around the ramp.
+const padMark = new THREE.Mesh(new THREE.RingGeometry(CONFIG.bankReach - 0.25, CONFIG.bankReach, 48), new THREE.MeshBasicMaterial({ color: "#ffb340", transparent: true, opacity: 0.7 }));
+padMark.rotation.x = -Math.PI / 2; padMark.position.set(RAMP.x, 0.03, RAMP.z); scene.add(padMark);
+
+const wallTex = canvasTex(64, 128, (c, w, h) => {
+  c.fillStyle = "#68707c"; c.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 32) { c.fillStyle = "#5a616c"; c.fillRect(0, y, w, 3); }
+  c.fillStyle = "#c9a22a"; for (let x = -8; x < w; x += 16) { c.beginPath(); c.moveTo(x, h - 18); c.lineTo(x + 8, h - 18); c.lineTo(x + 16, h); c.lineTo(x + 8, h); c.fill(); }
+  c.fillStyle = "#2a2d33"; c.fillRect(0, h - 22, w, 4); noise(c, w, h, 300, 0.35);
+});
+const WALL_H = 2.6, walls = find("#"), crates = find("x"), fences = find("%");
+const wallMats = [0, 1, 2, 3, 4, 5].map((i) => (i === 2 ? new THREE.MeshStandardMaterial({ color: "#3c4352", roughness: 1 }) : new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9 })));
+const wallMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(TS, WALL_H, TS), wallMats, walls.length);
+const crateMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 1.1, 1.5), new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (c) => { c.fillStyle = "#3d6d8a"; c.fillRect(0, 0, 64, 64); c.strokeStyle = "#24465a"; c.lineWidth = 6; c.strokeRect(3, 3, 58, 58); c.fillStyle = "#e9e3d0"; c.fillRect(18, 26, 28, 10); }), roughness: 0.8 }), crates.length);
+const fenceMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(TS, 1.0, 0.2), new THREE.MeshStandardMaterial({ color: "#59606b", metalness: 0.5, roughness: 0.6 }), fences.length);
+const mtx = new THREE.Matrix4();
+walls.forEach((p, i) => wallMesh.setMatrixAt(i, mtx.makeTranslation(p.x, WALL_H / 2, p.z)));
+crates.forEach((p, i) => crateMesh.setMatrixAt(i, mtx.makeRotationY(i * 0.7).setPosition(p.x, 0.55, p.z)));
+fences.forEach((p, i) => { const side = toCell(p.x) === 0 || toCell(p.x) === MW - 1; fenceMesh.setMatrixAt(i, (side ? mtx.makeRotationY(Math.PI / 2) : mtx.identity()).setPosition(p.x, 0.5, p.z)); });
+wallMesh.castShadow = wallMesh.receiveShadow = crateMesh.castShadow = crateMesh.receiveShadow = true;
+scene.add(wallMesh, crateMesh, fenceMesh);
+
+const glowTex = canvasTex(64, 64, (c) => { const g = c.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, "#fff"); g.addColorStop(0.3, "#ffffff88"); g.addColorStop(1, "#fff0"); c.fillStyle = g; c.fillRect(0, 0, 64, 64); });
+const glow = (color, size, opacity = 1) => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity })); s.scale.set(size, size, 1); return s; };
+
+// Emergency lamps: amber glows on walls that face a room (no real light, so they cost nothing).
+const lamps = [];
+walls.forEach((p, i) => {
+  const cx = toCell(p.x), cz = toCell(p.z);
+  if (i % 7 || cz < OUT_ROWS || !".s".includes(cell(cx, cz + 1))) return;
+  const s = glow(i % 3 ? "#ffb347" : "#ff5a4a", 2.6, 0.55); s.position.set(p.x, 2.3, p.z + 1.05); scene.add(s); lamps.push(s);
+  const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.12), new THREE.MeshBasicMaterial({ color: i % 3 ? "#ffc56b" : "#ff7a6a" })); bulb.position.set(p.x, 2.3, p.z + 1.02); scene.add(bulb);
+});
+
+// The ship: a squat hauler on the landing field with floodlights, a beacon and a ramp.
+const ship = new THREE.Group();
+{
+  const hullMat = new THREE.MeshStandardMaterial({ color: "#c6cbd3", metalness: 0.5, roughness: 0.45 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: "#3a404c", metalness: 0.4, roughness: 0.6 });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(9.5, 3, 5.6), hullMat); hull.position.y = 2.1; hull.castShadow = true;
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(7.5, 1.2, 4.6), hullMat); roof.position.y = 4.1;
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.35, 5.7), new THREE.MeshStandardMaterial({ color: "#ff9f1c", emissive: "#ff7a00", emissiveIntensity: 0.4 })); stripe.position.y = 2.6;
+  const win = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 0.1), new THREE.MeshBasicMaterial({ color: "#9fe3ff" })); win.position.set(0, 4.1, 2.32);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.2, 0.1), new THREE.MeshBasicMaterial({ color: "#ffe9b0" })); door.position.set(0, 1.5, 2.82);
+  const ramp = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.15, 2.4), darkMat); ramp.position.set(0, 0.35, 3.9); ramp.rotation.x = 0.25;
+  for (const [x, z] of [[-4, -2], [4, -2], [-4, 2], [4, 2]]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.3, 1.2, 8), darkMat); leg.position.set(x, 0.5, z); ship.add(leg); }
+  const beacon = glow("#ff4040", 2.2, 0.9); beacon.position.set(0, 5, 0); ship.userData.beacon = beacon;
+  const doorGlow = glow("#ffd890", 6, 0.6); doorGlow.position.set(0, 1.5, 3.2);
+  for (const s of [-1, 1]) { const f = glow("#fff2c0", 2, 0.9); f.position.set(s * 4.6, 3.6, 2.9); ship.add(f); }
+  ship.add(hull, roof, stripe, win, door, ramp, beacon, doorGlow);
+}
+ship.position.set(SHIP.x, 0, SHIP.z - 0.6); scene.add(ship);
+const shipLight = new THREE.PointLight("#ffe2a8", 30, 16, 1.4); shipLight.position.set(RAMP.x, 4, RAMP.z - 0.5); scene.add(shipLight);
+
+// Scrap models, built from KINDS[k].shape. Every piece glows a little so you can spot it.
+const scrapMats = KINDS.map((k) => new THREE.MeshStandardMaterial({ color: k.color, emissive: k.color, emissiveIntensity: 0.35, metalness: 0.5, roughness: 0.45 }));
+function makeScrap(k, withGlow) {
+  const g = new THREE.Group(), m = scrapMats[k], add = (geo, x = 0, y = 0, z = 0, rx = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.x = rx; o.castShadow = true; g.add(o); return o; };
+  switch (KINDS[k].shape) {
+    case "cog": add(new THREE.TorusGeometry(0.28, 0.1, 6, 10), 0, 0.3, 0); break;
+    case "battery": add(new THREE.CylinderGeometry(0.16, 0.16, 0.5, 10), 0, 0.25); add(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 8), 0, 0.55); break;
+    case "lamp": add(new THREE.CylinderGeometry(0.2, 0.25, 0.08, 10), 0, 0.04); add(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 6), 0, 0.3); add(new THREE.ConeGeometry(0.22, 0.25, 10, 1, true), 0, 0.58); break;
+    case "robot": add(new THREE.BoxGeometry(0.34, 0.36, 0.24), 0, 0.3); add(new THREE.BoxGeometry(0.24, 0.2, 0.2), 0, 0.6); break;
+    case "mug": add(new THREE.CylinderGeometry(0.2, 0.17, 0.4, 12), 0, 0.2); add(new THREE.TorusGeometry(0.1, 0.035, 6, 10), 0.22, 0.22); break;
+    case "engine": add(new THREE.BoxGeometry(0.9, 0.6, 0.6), 0, 0.3); add(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 8), -0.2, 0.75); add(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 8), 0.2, 0.75); break;
+    case "barrel": add(new THREE.CylinderGeometry(0.38, 0.38, 0.95, 14), 0, 0.48); break;
+    case "safe": add(new THREE.BoxGeometry(0.75, 0.75, 0.7), 0, 0.38); add(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 10), 0, 0.42, 0.37, Math.PI / 2); break;
+  }
+  if (withGlow) { const s = glow(KINDS[k].color, KINDS[k].heavy ? 2.6 : 1.8, 0.45); s.position.y = 0.4; g.add(s); }
+  scene.add(g); return g;
+}
+const grabRing = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.75, 32), new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
+grabRing.rotation.x = -Math.PI / 2; grabRing.visible = false; scene.add(grabRing);
+
+// Sparks, coins and gore: a small particle pool.
+const bits = [];
+function burst(x, y, z, color, n, speed) {
+  for (let i = 0; i < n; i++) {
+    const s = glow(color, 0.35 + Math.random() * 0.3); s.position.set(x, y, z); scene.add(s);
+    bits.push({ s, vx: (Math.random() - 0.5) * speed, vy: Math.random() * speed, vz: (Math.random() - 0.5) * speed, life: 0.6 + Math.random() * 0.5 });
+  }
+}
+
+// ── CREATURES ───────────────────────────────────────────────────────────────────────
+function nameTag(text) {
+  const tex = canvasTex(256, 64, (c) => { c.font = "bold 34px system-ui"; c.textAlign = "center"; c.lineWidth = 6; c.strokeStyle = "#000c"; c.strokeText(text, 128, 44); c.fillStyle = "#fff"; c.fillText(text, 128, 44); });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true })); s.scale.set(3, 0.75, 1); s.position.y = 2.5; return s;
+}
+const ringGeo = new THREE.RingGeometry(0.9, 1.0, 40);
+/** A crewmate in a colored suit with a helmet, a backpack and a flashlight. */
+function makeCrew(color, name) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.95, 10), mat); torso.position.y = 0.78;
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 10), new THREE.MeshStandardMaterial({ color: "#e8e8ea", roughness: 0.4 })); helmet.position.y = 1.5;
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.12), new THREE.MeshBasicMaterial({ color: "#7ad8ff" })); visor.position.set(0, 1.52, 0.29);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.55, 0.22), new THREE.MeshStandardMaterial({ color: "#4a4f5a" })); pack.position.set(0, 0.95, -0.36);
+  const torch = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.38, 8).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: "#333" })); torch.position.set(0.3, 1.0, 0.3);
+  const lens = glow("#fff6d0", 0.6); lens.position.set(0.3, 1.0, 0.52);
+  body.add(torso, helmet, visor, pack, torch, lens); torso.castShadow = helmet.castShadow = true;
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 16), new THREE.MeshBasicMaterial({ color: "#000", transparent: true, opacity: 0.35 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
+  // Sound rings: the louder you are, the bigger they pulse (the Hound hears exactly this).
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: "#7af0ff", transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04;
+  g.add(body, shadow, ring);
+  if (name) g.add(nameTag(name));
+  g.userData = { body, ring, lens, mat, carry: null, carryK: -1 };
+  scene.add(g); return g;
+}
+/** Lying down when dead, carrying scrap in front, sound rings when loud. */
+function pose(g, dead, carryK, noise, t, moving) {
+  const u = g.userData;
+  u.body.rotation.x = dead ? -Math.PI / 2 : 0; u.body.position.y = dead ? 0.3 : moving ? Math.abs(Math.sin(t * 10)) * 0.08 : 0; u.body.position.z = dead ? -0.7 : 0;
+  if (u.carryK !== carryK) { if (u.carry) { g.remove(u.carry); scene.remove(u.carry); } u.carry = carryK >= 0 ? makeScrap(carryK, false) : null; if (u.carry) { scene.remove(u.carry); g.add(u.carry); u.carry.position.set(0, 0.55, 0.55); u.carry.scale.setScalar(0.85); } u.carryK = carryK; }
+  const loud = dead ? 0 : noise, k = (t * 1.6) % 1;
+  u.ring.material.opacity = loud ? (1 - k) * (loud >= 2 ? 0.7 : 0.4) : 0;
+  u.ring.scale.setScalar(0.5 + k * (loud >= 2 ? 3 : 1.4));
+}
+const views = new Map(); // id -> { g, x, z, h, fresh } for everyone but me
+function viewOf(id, color, name) {
+  let v = views.get(id);
+  if (!v) { v = { g: makeCrew(color, ATTRACT ? "" : name), x: 0, z: 0, h: 0, fresh: true }; views.set(id, v); }
+  return v;
+}
+function ease(v, x, z, h, dt) {
+  if (v.fresh) { v.x = x; v.z = z; v.h = h; v.fresh = false; }
+  const k = 1 - Math.pow(0.0008, dt);
+  v.x += (x - v.x) * k; v.z += (z - v.z) * k; v.h += angDiff(h, v.h) * k;
+  v.g.position.set(v.x, 0, v.z); v.g.rotation.y = v.h;
+}
+
+/** The three monsters. Each has a colored haze so you can always spot it. */
+function makeMonster(k) {
+  const g = new THREE.Group(), add = (geo, mat, x, y, z) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+  if (k === "W") { // the Watcher: a tall pale mannequin with a blank face
+    const pale = new THREE.MeshStandardMaterial({ color: "#d9d4c7", roughness: 0.5, emissive: "#3a3630", emissiveIntensity: 0.5 });
+    add(new THREE.CylinderGeometry(0.28, 0.4, 2.0, 10), pale, 0, 1.15, 0);
+    add(new THREE.SphereGeometry(0.34, 14, 10), pale, 0, 2.45, 0);
+    for (const s of [-1, 1]) { const a = add(new THREE.BoxGeometry(0.13, 1.6, 0.13), pale, s * 0.42, 1.3, 0); a.rotation.z = s * 0.1; }
+    const eyes = new THREE.MeshBasicMaterial({ color: "#ff3b3b" });
+    for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.1, 0.03, 0.04), eyes, s * 0.12, 2.5, 0.32);
+    g.userData.eyes = eyes;
+  } else if (k === "H") { // the Hound: low, eyeless, with glowing fins that listen
+    const skin = new THREE.MeshStandardMaterial({ color: "#2a3036", roughness: 0.9 });
+    add(new THREE.BoxGeometry(0.8, 0.6, 1.7), skin, 0, 0.85, 0);
+    add(new THREE.BoxGeometry(0.55, 0.45, 0.7), skin, 0, 0.95, 1.05);
+    for (const [x, z] of [[-0.35, 0.6], [0.35, 0.6], [-0.35, -0.6], [0.35, -0.6]]) add(new THREE.BoxGeometry(0.16, 0.7, 0.16), skin, x, 0.35, z);
+    const fin = new THREE.MeshStandardMaterial({ color: "#3ff0e0", emissive: "#20d8c8", emissiveIntensity: 1 });
+    for (const s of [-1, 1]) { const f = add(new THREE.BoxGeometry(0.05, 0.5, 0.45), fin, s * 0.3, 1.35, 1.0); f.rotation.z = s * 0.5; }
+    g.userData.fin = fin;
+  } else { // the Crawler: a dark many-legged lump with red eyes
+    const shell = new THREE.MeshStandardMaterial({ color: "#2b1d24", roughness: 0.7 });
+    add(new THREE.SphereGeometry(0.6, 14, 10), shell, 0, 0.7, 0);
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2, leg = add(new THREE.BoxGeometry(0.1, 0.1, 1.1), shell, Math.sin(a) * 0.75, 0.4, Math.cos(a) * 0.75); leg.rotation.y = a; leg.rotation.x = 0.5; }
+    const eyes = new THREE.MeshBasicMaterial({ color: "#ff4030" });
+    for (const s of [-1, 0, 1]) add(new THREE.SphereGeometry(0.07, 8, 6), eyes, s * 0.18, 0.9, 0.55);
+  }
+  const haze = glow(k === "W" ? "#ff4040" : k === "H" ? "#30e0d0" : "#ff7a30", 4.2, 0.45); haze.position.y = 1.1; g.add(haze);
+  g.userData.haze = haze; g.userData.k = k;
+  scene.add(g); return g;
+}
+const monViews = new Map(); // monster id -> { g, x, z, h, fresh }
+
+// Flashlights: one spotlight per nearby person (a fixed pool, so the scene never recompiles).
+const torches = Array.from({ length: 4 }, (_, i) => {
+  const L = new THREE.SpotLight("#fff1cf", CONFIG.light.power, CONFIG.light.range, CONFIG.light.angle, 0.45, 1.3);
+  if (i === 0 && CONFIG.shadows) { L.castShadow = true; L.shadow.mapSize.set(512, 512); L.shadow.camera.near = 0.3; L.shadow.bias = -0.002; }
+  scene.add(L, L.target); return L;
+});
+function aimTorch(L, x, z, h, on, t, i) {
+  const fl = on ? 0.92 + 0.08 * Math.sin(t * 23 + i * 5) * Math.sin(t * 3.1 + i) : 0;
+  L.intensity = CONFIG.light.power * fl;
+  L.position.set(x + Math.sin(h) * 0.3, 1.1, z + Math.cos(h) * 0.3);
+  L.target.position.set(x + Math.sin(h) * 6, 0, z + Math.cos(h) * 6);
+}
+
+// ── DAY (HOST) ──────────────────────────────────────────────────────────────────────
+const host = { last: null, was: false, bots: new Map(), mons: [], again: false, lastPub: 0, lastPos: new Map(), noises: [] };
+/** The run as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function game() { const g = shared("game", null); return host.last && isHost() && (!g || host.last.v > g.v) ? host.last : g; }
+function writeGame(g) { g = { ...g, v: Math.max(game()?.v ?? 0, host.last?.v ?? 0) + 1 }; host.last = g; net.setShared("game", JSON.stringify(g)); return g; }
+
+const quotaFor = (day) => Math.round((CONFIG.quota * Math.pow(CONFIG.quotaGrowth, day - 1)) / 10) * 10;
+/** Scatter the day's scrap: [x, z, kind, $value, carrierId or "", banked 0/1]. */
+function scatter(seed, day) {
+  const r = mulberry32(seed), spots = [...SCRAP_SPOTS], n = Math.min(spots.length, CONFIG.scrapFirst + CONFIG.scrapPerDay * (day - 1)), out = [];
+  for (let i = spots.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [spots[i], spots[j]] = [spots[j], spots[i]]; }
+  for (let i = 0; i < n; i++) {
+    const k = Math.floor(r() * KINDS.length), K = KINDS[k], value = Math.round((K.lo + r() * (K.hi - K.lo)) * (1 + CONFIG.valueGrowth * (day - 1)));
+    out.push([r1(spots[i].x + (r() - 0.5)), r1(spots[i].z + (r() - 0.5)), k, value, "", 0]);
+  }
+  return out;
+}
+/** A new day: fresh scrap, fresh monsters, everyone alive at the ship. */
+function newDay(id, day, total) {
+  const seed = (Math.random() * 1e9) | 0, t = Date.now();
+  return { id, day, quota: quotaFor(day), banked: 0, total, phase: "land", seed, phaseAt: t, startAt: t + CONFIG.landMs, endsAt: t + CONFIG.landMs + CONFIG.dayMs, items: scatter(seed, day), dead: {} };
+}
+function spawnMonsters(day, seed) {
+  const r = mulberry32(seed ^ 0x5eed), list = CONFIG.monstersByDay[Math.min(day, CONFIG.monstersByDay.length) - 1], used = new Set();
+  host.mons = [...list].map((k, n) => {
+    let at = !used.has(k) && MON_STARTS[k];
+    used.add(k);
+    if (!at) { const far = INDOOR.filter((p) => dist(p, RAMP) > 16); at = far[Math.floor(r() * far.length)]; }
+    return { i: "m" + n, k, x: at.x, z: at.z, h: 0, s: k === "W" ? "f" : k === "H" ? "w" : "p", goal: null, path: [], think: 0, until: 0, lostAt: 0, tgt: "" };
+  });
+}
+function startDay(id, day, total) {
+  const g = writeGame(newDay(id, day, total));
+  spawnMonsters(day, g.seed);
+  let n = 0;
+  for (const b of host.bots.values()) Object.assign(b, spawnSpot(4 + n++), { path: [], goal: null, mode: "scav", think: 0, tgtI: -1 });
+  host.noises = [];
+  return g;
+}
+/** Spot n of a small fan in front of the ramp (players take 0-3, bots 4 and up). */
+const spawnSpot = (n) => ({ x: RAMP.x + Math.sin(n * 2.4) * 2.2 * (n ? 1 : 0), z: RAMP.z + 1.6 + Math.cos(n * 2.4) * 0.8 * (n ? 1 : 0), h: 0 });
+/** Become host: take over the day, the monsters and the bots exactly as state has them. */
+function adopt() {
+  host.was = true; host.bots.clear();
+  for (const b of shared("bots", [])) host.bots.set(b.i, { id: b.i, name: b.n, color: b.c, x: b.x, z: b.z, h: b.h, path: [], goal: null, mode: "scav", think: 0, tgtI: -1 });
+  host.mons = shared("mons", []).map((m) => ({ i: m.i, k: m.k, x: m.x, z: m.z, h: m.h, s: m.s === "e" ? (m.k === "W" ? "f" : m.k === "H" ? "w" : "p") : m.s, goal: null, path: [], think: 0, until: 0, lostAt: Date.now(), tgt: "" }));
+  if (!host.mons.length && game()) spawnMonsters(game().day, game().seed);
+}
+function botList() {
+  if (isHost() && host.was) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.name, c: b.color, x: b.x, z: b.z, h: b.h, mv: b.mv ? 1 : 0, r: b.r ? 1 : 0 })); // host.was: adopted (not leftovers from an earlier turn as host)
+  return shared("bots", []);
+}
+function monList() { return isHost() && host.was ? host.mons : shared("mons", []); }
+const posCache = new Map();
+/** Another player's packed `p` field, parsed once per change. */
+function posOf(id, p) { let c = posCache.get(id); if (!c || c.raw !== p.p) { c = { raw: p.p, v: parse(p.p, null) }; posCache.set(id, c); } return c.v; }
+const carrying = (g, id) => (g ? g.items.findIndex((it) => it[4] === id && !it[5]) : -1);
+/** The whole crew as { id, name, color, x, z, h, light, noise, bot, mine }. */
+function people() {
+  const out = [], live = new Set(livePlayers());
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (id === net.sessionId) { out.push({ id, name: myName, color: myColor, x: me.x, z: me.z, h: me.h, light: me.light, noise: me.noise, mine: true }); continue; }
+    const q = posOf(id, p);
+    if (live.has(id) && q) out.push({ id, name: p.n || "Player", color: p.c || "#ccc", x: q.x, z: q.z, h: q.h, light: !!q.l, noise: q.m || 0 });
+  }
+  for (const b of botList()) out.push({ id: b.i, name: b.n, color: b.c, x: b.x, z: b.z, h: b.h, light: true, noise: b.r ? 2 : b.mv ? 1 : 0, bot: true });
+  return out;
+}
+
+function hostTick(dt, now) {
+  if (!host.was) adopt();
+  let g = game();
+  if (!g) g = startDay(1, 1, 0);
+  const t = Date.now(), G = clone(g);
+  let dirty = fillBots(G);
+  const all = people(), up = all.filter((c) => !G.dead[c.id]);
+  for (const c of all) host.lastPos.set(c.id, { x: c.x, z: c.z });
+  if (G.phase === "land" && t >= G.startAt) { G.phase = "day"; dirty = true; }
+  if (G.phase === "day") {
+    dirty = monstersTick(dt, G, up, t) || dirty;
+    G.items.forEach((it) => { // carriers: gone → drop it; at the ramp → bank it
+      if (it[5] || !it[4]) return;
+      const c = all.find((o) => o.id === it[4]);
+      if (!c) { const p = host.lastPos.get(it[4]) || RAMP; Object.assign(it, { 0: r1(p.x), 1: r1(p.z), 4: "" }); dirty = true; }
+      else if (dist(c, RAMP) < CONFIG.bankReach) { it[5] = 1; it[4] = ""; it[0] = RAMP.x; it[1] = RAMP.z; G.banked += it[3]; dirty = true; }
+    });
+    if (t >= G.endsAt || !up.length) { endDay(G, t, !up.length); dirty = true; }
+  } else if (G.phase === "leave" && t >= G.nextAt) {
+    if (G.met) startDay(G.id, G.day + 1, G.total); else { Object.assign(G, { phase: "over", phaseAt: t, nextAt: t + CONFIG.resultsMs }); writeGame(G); }
+    return publish(now, true);
+  } else if (G.phase === "over" && (t >= G.nextAt || host.again)) {
+    host.again = false; startDay(G.id + 1, 1, 0); return publish(now, true);
+  }
+  host.again = false;
+  dirty = botsTick(dt, G, all, t) || dirty;
+  if (dirty) writeGame(G);
+  publish(now, false);
+}
+/** Dusk (or nobody left alive): the ship takes off. The quota is checked here. */
+function endDay(G, t, wiped) {
+  for (const it of G.items) if (it[4]) { const p = host.lastPos.get(it[4]); if (p) { it[0] = r1(p.x); it[1] = r1(p.z); } it[4] = ""; } // scrap still in hand stays behind
+  Object.assign(G, { phase: "leave", phaseAt: t, nextAt: t + CONFIG.leaveMs, met: G.banked >= G.quota, wiped: wiped ? 1 : 0, total: G.total + G.banked });
+}
+/** ~10/s: one message for the monsters, one for all the bots. */
+function publish(now, force) {
+  if (!force && now - host.lastPub < 100) return;
+  host.lastPub = now;
+  net.setShared("mons", JSON.stringify(host.mons.map((m) => ({ i: m.i, k: m.k, x: r1(m.x), z: r1(m.z), h: r1(m.h), s: m.s }))));
+  net.setShared("bots", JSON.stringify(botList().map((b) => ({ ...b, x: r1(b.x), z: r1(b.z), h: r1(b.h) }))));
+}
+
+/** Bots fill the crew up to CONFIG.seats. A bot that leaves drops its scrap. */
+function fillBots(G) {
+  const want = Math.max(0, CONFIG.seats - livePlayers().length);
+  let dirty = false;
+  while (host.bots.size > want) {
+    const id = [...host.bots.keys()].pop(), b = host.bots.get(id);
+    for (const it of G.items) if (it[4] === id) { Object.assign(it, { 0: r1(b.x), 1: r1(b.z), 4: "" }); dirty = true; }
+    if (G.dead[id]) { delete G.dead[id]; dirty = true; }
+    host.bots.delete(id);
+  }
+  while (host.bots.size < want) {
+    const used = new Set([...host.bots.values()].map((b) => b.name)), name = BOT_NAMES.find((n) => !used.has(n)) || "Bot";
+    const usedC = new Set(people().map((p) => p.color)), id = "b" + Math.random().toString(36).slice(2, 6);
+    host.bots.set(id, { id, name, color: COLORS.find((c) => !usedC.has(c)) || COLORS[5], ...spawnSpot(4 + host.bots.size), path: [], goal: null, mode: "scav", think: 0, tgtI: -1 });
+  }
+  return dirty;
+}
+
+/** Someone got caught: they die for the rest of the day and their scrap drops where they fell. */
+function kill(G, c, m, t) {
+  G.dead[c.id] = m.k;
+  for (const it of G.items) if (it[4] === c.id) Object.assign(it, { 0: r1(c.x), 1: r1(c.z + 0.6), 4: "" });
+  Object.assign(m, { s: "e", until: t + CONFIG.eatMs, goal: null, path: [], tgt: "" });
+  host.noises.push({ x: c.x, z: c.z, at: t, r: CONFIG.hound.hearDrop });
+}
+/** Is any flashlight that is on pointed at this spot, with nothing in the way? */
+function lookedAt(m, up) {
+  const W = CONFIG.watcher;
+  return up.some((c) => c.light && dist(c, m) < W.freezeRange && Math.abs(angDiff(Math.atan2(m.x - c.x, m.z - c.z), c.h)) < W.freezeAngle && canSee(c, m));
+}
+function monstersTick(dt, G, up, t) {
+  let dirty = false;
+  host.noises = host.noises.filter((n) => t - n.at < 400);
+  if (t < G.startAt + CONFIG.wakeMs) return false; // still waking up
+  for (const m of host.mons) {
+    if (m.s === "e") { if (t < m.until) continue; m.s = m.k === "W" ? "f" : m.k === "H" ? "w" : "p"; }
+    if (m.k === "W") watcherTick(m, dt, up, t);
+    else if (m.k === "H") houndTick(m, dt, G, up, t);
+    else crawlerTick(m, dt, up, t);
+    if (m.k === "W" && m.s === "f") continue; // a Watcher you are looking at can't hurt you
+    const prey = up.find((c) => !G.dead[c.id] && dist(m, c) < CONFIG.catch && (m.k !== "H" || c.noise > 0)); // the Hound can't find you if you keep still
+    if (prey) { kill(G, prey, m, t); dirty = true; }
+  }
+  return dirty;
+}
+/** The Watcher: walks at the nearest crewmate, but only while no flashlight is on it. */
+function watcherTick(m, dt, up, t) {
+  const W = CONFIG.watcher;
+  if (lookedAt(m, up)) { m.s = "f"; return; }
+  const near = up.filter((c) => dist(c, m) < W.notice).sort((a, b) => dist(a, m) - dist(b, m))[0];
+  m.s = near ? "m" : "w";
+  if (near && (t > m.think || !m.path.length)) { m.think = t + 400; m.path = route(m, near); }
+  if (!near && !m.path.length) m.path = route(m, INDOOR[Math.floor(Math.random() * INDOOR.length)]);
+  follow(m, near ? W.speed : W.wander, dt);
+}
+/** The Hound: blind. It rushes to the last noise it heard, listens, then wanders. */
+function houndTick(m, dt, G, up, t) {
+  const H = CONFIG.hound;
+  let heard = null, hd = Infinity;
+  for (const c of up) {
+    const heavy = carrying(G, c.id) >= 0 && KINDS[G.items[carrying(G, c.id)][2]].heavy;
+    const r = c.noise === 2 ? H.hearRun : c.noise === 1 ? (heavy ? H.hearHeavy : H.hearWalk) : 0, d = dist(m, c);
+    if (r && d < r && d < hd) { heard = c; hd = d; }
+  }
+  for (const n of host.noises) { const d = dist(m, n); if (d < n.r && d < hd) { heard = n; hd = d; } }
+  if (heard) { if (m.s !== "r" || t > m.think) { m.goal = { x: heard.x, z: heard.z }; m.path = route(m, m.goal); m.think = t + 350; } m.s = "r"; }
+  if (m.s === "r") { if (!follow(m, H.rush, dt)) { m.s = "l"; m.until = t + H.listenMs; } return; }
+  if (m.s === "l") { if (t > m.until) m.s = "w"; return; }
+  if (!m.path.length) m.path = route(m, INDOOR[Math.floor(Math.random() * INDOOR.length)]);
+  follow(m, H.wander, dt);
+}
+/** The Crawler: patrols, chases anyone it sees (a lit flashlight is easy to see), gives up when it loses you. */
+function crawlerTick(m, dt, up, t) {
+  const C = CONFIG.crawler;
+  let seen = null, sd = Infinity;
+  for (const c of up) {
+    const d = dist(m, c);
+    if (d > (c.light ? C.sight : C.sightDark) || d >= sd) continue;
+    if ((Math.abs(angDiff(Math.atan2(c.x - m.x, c.z - m.z), m.h)) < 1.2 || d < 3) && canSee(m, c)) { seen = c; sd = d; }
+  }
+  if (seen) Object.assign(m, { s: "c", tgt: seen.id, goal: { x: seen.x, z: seen.z }, lostAt: t });
+  else if (m.s === "c" && t - m.lostAt > C.giveUpMs) Object.assign(m, { s: "p", tgt: "", goal: null });
+  if (!m.goal) { m.goal = SCRAP_SPOTS[Math.floor(Math.random() * SCRAP_SPOTS.length)]; m.think = 0; }
+  if (t > m.think || !m.path.length) { m.think = t + (m.s === "c" ? 300 : 900); m.path = route(m, m.goal); if (!m.path.length && m.s !== "c") m.goal = null; }
+  const speed = m.s === "c" ? C.chase : C.patrol;
+  if (seen && sd < 2.5) { const dx = seen.x - m.x, dz = seen.z - m.z; m.x += (dx / sd) * speed * dt; m.z += (dz / sd) * speed * dt; m.h = Math.atan2(dx, dz); }
+  else follow(m, speed, dt);
+  if (m.s !== "c" && m.goal && dist(m, m.goal) < 0.8) m.goal = null;
+}
+
+/** Bot crewmates (and your own player in ?attract): scavenge, haul to the ship, flee monsters. */
+function botsTick(dt, G, all, t) {
+  let dirty = false;
+  const agents = [...host.bots.values()];
+  if (ATTRACT) agents.push(me);
+  for (const b of agents) {
+    b.mv = b.r = false;
+    if (G.dead[b.id] || G.phase !== "day") continue;
+    if (t > b.think) { b.think = t + 300 + Math.random() * 250; dirty = botThink(b, G, t) || dirty; }
+    const ci = carrying(G, b.id), heavy = ci >= 0 && KINDS[G.items[ci][2]].heavy, fast = b.mode === "flee";
+    const speed = (b === me ? (fast ? CONFIG.run : CONFIG.walk) : fast ? CONFIG.botRun : CONFIG.botWalk) * (ci < 0 ? 1 : heavy ? CONFIG.heavySlow : CONFIG.lightSlow);
+    if (follow(b, speed, dt)) { b.mv = true; b.r = fast; }
+    if (b.stare) b.h = Math.atan2(b.stare.x - b.x, b.stare.z - b.z); // keep the flashlight on the Watcher
+    if (ci < 0 && b.tgtI >= 0) { const it = G.items[b.tgtI]; if (it && !it[4] && !it[5] && Math.hypot(it[0] - b.x, it[1] - b.z) < CONFIG.reach) { it[4] = b.id; b.tgtI = -1; b.think = 0; dirty = true; } }
+    if (b === me) me.noise = b.mv ? (b.r ? 2 : 1) : 0;
+  }
+  return dirty;
+}
+function botThink(b, G, t) {
+  let dirty = false;
+  const ci = carrying(G, b.id), mons = host.mons;
+  b.stare = null;
+  let threat = null;
+  for (const m of mons) {
+    const d = dist(m, b);
+    if (m.s === "e") continue;
+    if (m.k === "W" && d < 11 && canSee(b, m)) { b.stare = m; if (d < 4) threat = m; }
+    else if (m.k === "H" && d < (m.s === "r" ? 9 : 4.5)) threat = m;
+    else if (m.k === "C" && ((m.s === "c" && m.tgt === b.id) || (d < 6 && canSee(m, b)))) threat = m;
+  }
+  let mode = "scav", goal = null;
+  if (threat) {
+    mode = "flee";
+    if (ci >= 0 && KINDS[G.items[ci][2]].heavy && dist(threat, b) < 4) { Object.assign(G.items[ci], { 0: r1(b.x), 1: r1(b.z), 4: "" }); host.noises.push({ x: b.x, z: b.z, at: t, r: CONFIG.hound.hearDrop }); dirty = true; }
+    goal = [...SCRAP_SPOTS, RAMP].filter((s) => dist(s, threat) > dist(s, b) + 2).sort((p, q) => (dist(q, threat) - dist(q, b) * 0.6) - (dist(p, threat) - dist(p, b) * 0.6))[0] || RAMP;
+    if (threat.k === "H") { b.mode = "hide"; b.goal = null; b.path = []; b.tgtI = -1; return dirty; } // the Hound is blind: keep still until it leaves
+  } else if (ci >= 0) { mode = "haul"; goal = { x: RAMP.x, z: RAMP.z + 0.5 }; }
+  else {
+    const taken = new Set([...host.bots.values(), ...(ATTRACT ? [me] : [])].filter((o) => o !== b).map((o) => o.tgtI));
+    const pick = G.items.map((it, i) => ({ i, x: it[0], z: it[1], it })).filter((o) => !o.it[4] && !o.it[5] && !taken.has(o.i) && mons.every((m) => dist(m, o) > 5))
+      .sort((p, q) => dist(p, b) - dist(q, b) - (p.it[3] - q.it[3]) * 0.04)[0];
+    if (pick) { goal = { x: pick.x, z: pick.z }; b.tgtI = pick.i; mode = "fetch"; }
+    else if (b.goal && b.path.length) goal = b.goal;
+    else goal = { x: RAMP.x + (Math.random() - 0.5) * 4, z: RAMP.z + 1.5 };
+  }
+  if (mode !== "fetch") b.tgtI = -1;
+  const same = b.goal && b.mode === mode && toCell(goal.x) === toCell(b.goal.x) && toCell(goal.z) === toCell(b.goal.z) && b.path.length;
+  b.mode = mode; b.goal = goal;
+  if (!same) b.path = route(b, goal);
+  return dirty;
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const FRIENDLY = ["Brave", "Quiet", "Lucky", "Swift", "Sly", "Bold"], ANIMALS = ["Otter", "Fox", "Moth", "Owl", "Badger", "Hare"];
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() || FRIENDLY[Math.floor(Math.random() * 6)] + " " + ANIMALS[Math.floor(Math.random() * 6)];
+let myColor = COLORS[0]; // picked on join: the first color nobody in the room has
+const me = { id: "", x: RAMP.x, z: RAMP.z, h: 0, light: true, noise: 0, mv: false, r: false, dayKey: "", runId: -1, lastSend: 0, tryAt: 0, path: [], goal: null, mode: "scav", think: 0, tgtI: -1, g: null, firstDay: 0 };
+const input = { up: false, down: false, left: false, right: false, run: false, grab: false };
+const aim = { on: false, nx: 0, ny: 0 }, stick = { id: -1, ox: 0, oy: 0, x: 0, y: 0 };
+const ray = new THREE.Raycaster(), floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitPt = new THREE.Vector3();
+
+/** The scrap you could grab right now (nearest free piece in reach), or -1. */
+function grabbable(g) {
+  let best = -1, bd = CONFIG.reach;
+  g.items.forEach((it, i) => { const d = Math.hypot(it[0] - me.x, it[1] - me.z); if (!it[4] && !it[5] && d < bd) { best = i; bd = d; } });
+  return best;
+}
+function myTick(dt, g) {
+  const key = g.id + ":" + g.day;
+  if (me.dayKey !== key) { me.dayKey = key; me.runId = g.id; Object.assign(me, spawnSpot(Math.max(0, livePlayers().indexOf(net.sessionId)) % 4), { path: [], goal: null, tgtI: -1 }); me.firstDay = 0; }
+  const dead = !!g.dead[net.sessionId], ci = carrying(g, net.sessionId), heavy = ci >= 0 && KINDS[g.items[ci][2]].heavy;
+  if (!ATTRACT) {
+    let mx = (input.right ? 1 : 0) - (input.left ? 1 : 0) + stick.x, mz = (input.down ? 1 : 0) - (input.up ? 1 : 0) + stick.y;
+    const len = Math.hypot(mx, mz), canMove = !dead && g.phase !== "leave" && g.phase !== "over";
+    if (len > 1) { mx /= len; mz /= len; }
+    me.mv = canMove && len > 0.15; me.r = me.mv && input.run;
+    if (me.mv) {
+      const sp = (me.r ? CONFIG.run : CONFIG.walk) * (ci < 0 ? 1 : heavy ? CONFIG.heavySlow : CONFIG.lightSlow);
+      moveBody(me, mx * sp * dt, mz * sp * dt);
+      if (!aim.on) me.h += angDiff(Math.atan2(mx, mz), me.h) * Math.min(1, dt * 10);
+    }
+    if (aim.on && !dead) {
+      ray.setFromCamera({ x: aim.nx, y: aim.ny }, camera);
+      if (ray.ray.intersectPlane(floorPlane, hitPt)) me.h = Math.atan2(hitPt.x - me.x, hitPt.z - me.z);
+    }
+    // E / GRAB: pick up the nearest scrap, or put down what you carry.
+    if (input.grab) {
+      input.grab = false;
+      if (g.phase === "day" && !dead && performance.now() > me.tryAt) {
+        me.tryAt = performance.now() + 350;
+        if (ci >= 0) { if (isHost()) applyDrop(net.sessionId, me.x, me.z); else net.send("drop", { x: r1(me.x), z: r1(me.z) }); sound("drop"); }
+        else { const i = grabbable(g); if (i >= 0) { if (isHost()) applyGrab(net.sessionId, i); else net.send("grab", { i }); } }
+      }
+    }
+    me.noise = me.mv ? (me.r ? 2 : 1) : 0;
+  }
+  const now = performance.now();
+  if (now - me.lastSend > 80) {
+    me.lastSend = now;
+    net.me.set("p", JSON.stringify({ x: r1(me.x), z: r1(me.z), h: r1(me.h), l: me.light ? 1 : 0, m: me.noise, d: key }));
+  }
+}
+/** A "grab" intent (or the host's own): award the scrap if it's free and you're next to it. */
+function applyGrab(id, i) {
+  const g = game();
+  if (!g || g.phase !== "day" || g.dead[id] || carrying(g, id) >= 0) return;
+  const it = g.items[i], who = people().find((c) => c.id === id);
+  if (!it || it[4] || it[5] || !who || Math.hypot(it[0] - who.x, it[1] - who.z) > CONFIG.reach + 1.5) return; // slack: the intent can beat the position update
+  const G = clone(g); G.items[i][4] = id; writeGame(G);
+}
+/** A "drop" intent: the scrap goes on the floor where you stand, and the Hound hears it. */
+function applyDrop(id, x, z) {
+  const g = game(), ci = carrying(g, id), who = people().find((c) => c.id === id);
+  if (!g || ci < 0) return;
+  if (!who || Math.hypot(x - who.x, z - who.z) > 3) { x = who ? who.x : x; z = who ? who.z : z; }
+  const G = clone(g); Object.assign(G.items[ci], { 0: r1(x), 1: r1(z), 4: "" }); writeGame(G);
+  host.noises.push({ x, z, at: Date.now(), r: CONFIG.hound.hearDrop * (KINDS[G.items[ci][2]].heavy ? 1 : 0.6) });
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const fmt = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
+let board = null, boardFor = -1, toastUntil = 0;
+let dropped = false; // true while the connection is down: the HUD keeps showing "Reconnecting…"
+function toast(text) { $("toast").textContent = text; $("toast").classList.add("on"); toastUntil = performance.now() + 1400; }
+function hud(g) {
+  const t = Date.now(), all = people();
+  if (performance.now() > toastUntil) $("toast").classList.remove("on");
+  if (ATTRACT) { for (const id of ["team", "big", "msg", "net", "clock"]) $(id).textContent = ""; $("quotaText").textContent = `$${g.banked} / $${g.quota}`; $("quotaBar").style.width = Math.min(100, (100 * g.banked) / g.quota) + "%"; $("over").hidden = true; return; }
+  $("quotaText").textContent = `Day ${g.day} · $${g.banked} / $${g.quota}`;
+  $("quotaBar").style.width = Math.min(100, (100 * g.banked) / g.quota) + "%";
+  $("quotaBar").classList.toggle("met", g.banked >= g.quota);
+  const left = g.endsAt - t;
+  $("clock").textContent = g.phase === "day" ? `Ship leaves at dusk: ${fmt(Math.max(0, left))}` : "";
+  $("clock").classList.toggle("late", g.phase === "day" && left < CONFIG.warnMs);
+  $("team").innerHTML = all.map((c) => { const ci = carrying(g, c.id); return `<div class="${c.mine ? "me" : ""} ${g.dead[c.id] ? "dead" : ""}">${esc(c.mine ? "You" : c.name)} ${g.dead[c.id] ? "💀" : ci >= 0 ? "$" + g.items[ci][3] : c.light ? "🔦" : "·"}</div>`; }).join("");
+  $("big").innerHTML = g.phase === "land" ? `Day ${g.day}<small>Quota: $${g.quota}. Bring scrap to the ship before dusk.</small>` : "";
+  let msg = "";
+  const dead = g.dead[net.sessionId], ci = carrying(g, net.sessionId);
+  if (g.phase === "day") {
+    if (!me.firstDay) me.firstDay = t;
+    const gi = grabbable(g), btn = touchUI ? "GRAB" : "E";
+    if (dead) msg = `${MON_NAMES[dead] ? "Killed by " + MON_NAMES[dead] : "You died"}. Your scrap dropped where you fell. You're back tomorrow.`;
+    else if (ci >= 0) msg = `Carrying ${KINDS[g.items[ci][2]].name} ($${g.items[ci][3]}): take it to the ship · ${btn} drops it`;
+    else if (gi >= 0) { const it = g.items[gi], K = KINDS[it[2]]; msg = `${btn} · grab ${K.name} · $${it[3]}${K.heavy ? " · heavy, slows you down" : ""}`; }
+    else if (t - me.firstDay < 10000) msg = touchUI ? "Left thumb walks · GRAB scrap · RUN is loud · keep your light on the pale one" : "WASD walk · mouse aims your flashlight · E grab · Shift runs (loud) · keep your light on the pale one";
+  }
+  $("msg").textContent = msg;
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the monsters" : ""}`;
+  const over = g.phase === "leave" || g.phase === "over";
+  $("over").hidden = !over;
+  $("overBoard").hidden = g.phase !== "over";
+  if (g.phase === "leave") {
+    $("overTitle").textContent = g.met ? "Quota met!" : "Quota missed…";
+    $("overLine").textContent = `${g.wiped ? "Nobody made it back. The ship left on autopilot. " : ""}$${g.banked} of $${g.quota} on day ${g.day}.${g.met ? ` Tomorrow's quota: $${quotaFor(g.day + 1)}.` : ""}`;
+    $("next").textContent = g.met ? `Landing again in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s` : "";
+  } else if (g.phase === "over") {
+    $("overTitle").textContent = "You're fired!";
+    $("overLine").textContent = `Your crew hauled $${g.total} of scrap over ${g.day} day${g.day === 1 ? "" : "s"}.`;
+    $("next").textContent = `New contract in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s`;
+    if (boardFor !== g.id) { boardFor = g.id; showBoard(g); }
+  }
+}
+function showBoard(g) {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  const submit = me.runId === g.id && g.total > 0 ? board.submit(g.total).catch(() => null) : Promise.resolve();
+  submit.then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>$${e.score}</span></li>`).join("") : "<li>No hauls yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+/** Keep a color nobody else has: the later sessionId gives way, and the bots' colors count as taken. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId), bots = botList().map((b) => b.c);
+  if (!others.some(([id, p]) => id < net.sessionId && p.c === myColor) && !bots.includes(myColor)) return;
+  const used = new Set([...others.map(([, p]) => p.c), ...bots]);
+  myColor = COLORS.find((c) => !used.has(c)) || myColor;
+  net.me.set("c", myColor); if (me.g) me.g.userData.mat.color.set(myColor);
+}
+$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+
+/** One-off effects worked out from what changed in state (so nobody misses one). */
+let prevG = null, sirenFor = "";
+function effects(g) {
+  if (prevG && prevG.id === g.id && prevG.day === g.day) {
+    for (const id of Object.keys(g.dead)) if (!prevG.dead[id]) { const c = people().find((o) => o.id === id); if (c) burst(c.x, 1, c.z, "#ff2233", 22, 4); sound(id === net.sessionId ? "caught" : "thud"); if (id === net.sessionId) shake = 0.7; }
+    g.items.forEach((it, i) => {
+      const p = prevG.items[i]; if (!p) return;
+      if (it[5] && !p[5]) { burst(RAMP.x, 1.2, RAMP.z, "#ffe066", 26, 5); sound("bank"); toast(`+$${it[3]} ${KINDS[it[2]].name}`); }
+      else if (it[4] && !p[4] && (it[4] === net.sessionId || dist({ x: it[0], z: it[1] }, me) < 10)) sound("pick");
+    });
+    if (g.phase === "leave" && prevG.phase !== "leave") sound(g.met ? "win" : "lose");
+  }
+  const key = g.id + ":" + g.day;
+  if (g.phase === "day" && g.endsAt - Date.now() < CONFIG.warnMs && sirenFor !== key) { sirenFor = key; sound("siren"); }
+  prevG = g;
+}
+
+// ── INPUT & SOUND ───────────────────────────────────────────────────────────────────
+const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
+$("pad").hidden = !touchUI;
+if (touchUI) { $("msg").style.bottom = "calc(max(18px, env(safe-area-inset-bottom)) + 104px)"; Object.assign($("net").style, { top: "calc(max(12px, env(safe-area-inset-top)) + 70px)", bottom: "auto", left: "16px", transform: "none" }); }
+const KEYS = { w: "up", ArrowUp: "up", s: "down", ArrowDown: "down", a: "left", ArrowLeft: "left", d: "right", ArrowRight: "right", Shift: "run" };
+addEventListener("keydown", (e) => {
+  const k = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key]; if (k) { e.preventDefault(); input[k] = true; }
+  if (e.repeat) return;
+  if (e.key.toLowerCase() === "f") toggleLight();
+  if (e.key.toLowerCase() === "e" || e.key === " ") { e.preventDefault(); input.grab = true; }
+});
+addEventListener("keyup", (e) => { const k = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key]; if (k) input[k] = false; });
+addEventListener("blur", () => { for (const k in input) input[k] = false; });
+function toggleLight() { me.light = !me.light; document.querySelector('[data-k="light"]').classList.toggle("on", me.light); sound("click"); }
+const cv = renderer.domElement;
+cv.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "mouse") { aim.on = true; aim.nx = (e.clientX / innerWidth) * 2 - 1; aim.ny = -(e.clientY / innerHeight) * 2 + 1; }
+  if (e.pointerId === stick.id) {
+    const dx = e.clientX - stick.ox, dy = e.clientY - stick.oy, d = Math.hypot(dx, dy), k = Math.min(1, d / 50) / (d || 1);
+    stick.x = dx * k; stick.y = dy * k; $("stick").firstElementChild.style.transform = `translate(${stick.x * 35}px, ${stick.y * 35}px)`;
+  }
+});
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault(); unlockAudio();
+  if (e.pointerType === "mouse" && e.button === 0) input.grab = true; // a click grabs too
+  if (e.pointerType !== "mouse" && stick.id < 0) { stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; Object.assign($("stick").style, { left: e.clientX + "px", top: e.clientY + "px" }); $("stick").hidden = false; }
+});
+for (const ev of ["pointerup", "pointercancel"]) cv.addEventListener(ev, (e) => { if (e.pointerId === stick.id) { stick.id = -1; stick.x = stick.y = 0; $("stick").hidden = true; } });
+for (const b of document.querySelectorAll(".pad button")) {
+  b.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); const k = b.dataset.k; if (k === "light") toggleLight(); else if (k === "grab") input.grab = true; else { input.run = true; b.classList.add("on"); } });
+  for (const ev of ["pointerup", "pointercancel"]) b.addEventListener(ev, () => { if (b.dataset.k === "run") { input.run = false; b.classList.remove("on"); } });
+}
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+let AC = null;
+function unlockAudio() { if (!AC && !ATTRACT) try { AC = new AudioContext(); } catch {} }
+addEventListener("keydown", unlockAudio);
+function sound(kind) {
+  if (!AC) return;
+  const t0 = AC.currentTime, tone = (f, d, type, v, f2, at = 0) => {
+    const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, t0 + at); o.frequency.exponentialRampToValueAtTime(f2, t0 + at + d);
+    g.gain.setValueAtTime(v, t0 + at); g.gain.exponentialRampToValueAtTime(0.001, t0 + at + d); o.connect(g).connect(AC.destination); o.start(t0 + at); o.stop(t0 + at + d);
+  };
+  if (kind === "beat") tone(68, 0.16, "sine", 0.4, 40);
+  if (kind === "click") tone(1200, 0.04, "square", 0.05, 900);
+  if (kind === "pick") tone(520, 0.12, "triangle", 0.15, 780);
+  if (kind === "drop") tone(140, 0.25, "square", 0.12, 50);
+  if (kind === "bank") { tone(880, 0.12, "square", 0.06, 880); tone(1320, 0.25, "triangle", 0.12, 1320, 0.08); }
+  if (kind === "caught") tone(420, 0.7, "sawtooth", 0.15, 50);
+  if (kind === "thud") tone(200, 0.3, "sawtooth", 0.07, 60);
+  if (kind === "siren") for (let i = 0; i < 3; i++) tone(440, 0.45, "sawtooth", 0.05, 660, i * 0.5);
+  if (kind === "win") { tone(523, 0.3, "triangle", 0.12, 523); tone(784, 0.5, "triangle", 0.12, 784, 0.2); }
+  if (kind === "lose") tone(300, 1.0, "sawtooth", 0.08, 70);
+}
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastHb = 0, lastHud = 0, shake = 0, nextBeat = 0;
+const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), arrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 3).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: "#ffb340" }));
+scene.add(arrow);
+let itemViews = [], itemsFor = "";
+function frame(now) {
+  requestAnimationFrame(frame);
+  const realNow = performance.now(); // timed on the real clock: after a long freeze the rAF time can be from before the wake
+  if (lastFrameAt && realNow - lastFrameAt > 1000) { wakeHold = realNow + 700; host.was = false; host.last = null; } lastFrameAt = realNow; // woke from a freeze or a background tab: let the newer state arrive, then adopt it like a new host
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)), t = now / 1000; last = now; // never negative: the first frame can be stamped before `last`
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); }
+  if (isHost()) hostTick(dt, now); else host.was = false;
+  const g = game();
+  if (!g) { renderer.render(scene, camera); return; }
+  myTick(dt, g); effects(g);
+  const key = g.id + ":" + g.day, inDay = g.phase === "day" || g.phase === "land";
+  // People: everyone else eased toward where they last said they were, bots, then me.
+  const seen = new Set(), drawn = [], live = new Set(livePlayers());
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const q = id !== net.sessionId && live.has(id) && posOf(id, p);
+    if (!q || q.d !== key) continue;
+    const v = viewOf(id, p.c || "#ccc", p.n || "Player"); seen.add(id); ease(v, q.x, q.z, q.h, dt);
+    drawn.push({ v, light: !!q.l, id, noise: q.m || 0 });
+  }
+  for (const b of botList()) { const v = viewOf(b.i, b.c, b.n); seen.add(b.i); ease(v, b.x, b.z, b.h, dt); drawn.push({ v, light: true, id: b.i, noise: b.r ? 2 : b.mv ? 1 : 0 }); }
+  for (const [id, v] of views) if (!seen.has(id)) { scene.remove(v.g); views.delete(id); }
+  if (!me.g) me.g = makeCrew(myColor, "");
+  me.g.position.set(me.x, 0, me.z); me.g.rotation.y = me.h;
+  for (const d of [...drawn, { v: { g: me.g }, light: me.light, id: net.sessionId, noise: me.noise }]) {
+    const ci = carrying(g, d.id), dead = !!g.dead[d.id];
+    pose(d.v.g, dead, ci >= 0 ? g.items[ci][2] : -1, d.noise, t, d.noise > 0);
+    d.v.g.userData.lens.visible = d.light && !dead;
+    d.dead = dead;
+  }
+  // Flashlights: mine first (it casts the shadows), then the nearest others.
+  drawn.sort((a, b) => dist(a.v.g.position, me) - dist(b.v.g.position, me));
+  const lit = [{ x: me.x, z: me.z, h: me.h, on: me.light && !g.dead[net.sessionId] }, ...drawn.map((d) => ({ x: d.v.g.position.x, z: d.v.g.position.z, h: d.v.g.rotation.y, on: d.light && !d.dead }))];
+  torches.forEach((L, i) => { const c = lit[i]; if (c) aimTorch(L, c.x, c.z, c.h, c.on && inDay, t, i); else L.intensity = 0; });
+  // Monsters: the host draws its own simulation, everyone else eases toward the ~10/s snapshot.
+  const mons = monList(), mseen = new Set();
+  let danger = 0;
+  for (const m of mons) {
+    let v = monViews.get(m.i);
+    if (!v || v.g.userData.k !== m.k) { if (v) scene.remove(v.g); v = { g: makeMonster(m.k), x: m.x, z: m.z, h: m.h }; monViews.set(m.i, v); }
+    mseen.add(m.i);
+    if (isHost()) { v.x = m.x; v.z = m.z; v.h = m.h; } else { const k = 1 - Math.pow(0.001, dt); v.x += (m.x - v.x) * k; v.z += (m.z - v.z) * k; v.h += angDiff(m.h, v.h) * k; }
+    const active = m.s === "m" || m.s === "r" || m.s === "c", u = v.g.userData;
+    v.g.position.set(v.x, m.k === "W" ? 0 : Math.abs(Math.sin(t * (active ? 10 : 4))) * 0.1, v.z); v.g.rotation.y = v.h;
+    v.g.visible = inDay;
+    u.haze.material.opacity = active ? 0.8 : 0.4; u.haze.scale.setScalar(active ? 5 : 4);
+    if (u.eyes) u.eyes.color.set(m.s === "f" ? "#552020" : "#ff3b3b");
+    if (u.fin) u.fin.emissiveIntensity = m.s === "r" || m.s === "l" ? 2 + Math.sin(t * 20) : 0.6;
+    if (g.phase === "day" && !g.dead[net.sessionId]) danger = Math.max(danger, Math.max(0, 1 - dist(v, me) / 11) * (active ? 1 : 0.5));
+  }
+  for (const [id, v] of monViews) if (!mseen.has(id)) { scene.remove(v.g); monViews.delete(id); }
+  $("fear").style.opacity = ATTRACT ? danger * 0.4 : g.dead[net.sessionId] && g.phase === "day" ? 0.7 : danger;
+  if (danger > 0.15 && now > nextBeat) { nextBeat = now + 1150 - 700 * danger; sound("beat"); }
+  // Scrap on the floor (rebuilt each day), the grab ring, the arrow to the ship.
+  if (itemsFor !== key) { itemsFor = key; for (const v of itemViews) scene.remove(v); itemViews = g.items.map((it) => makeScrap(it[2], true)); }
+  g.items.forEach((it, i) => { const v = itemViews[i]; if (!v) return; v.visible = !it[4] && !it[5]; v.position.set(it[0], 0, it[1]); v.rotation.y = i * 1.3; });
+  const gi = g.phase === "day" && !g.dead[net.sessionId] && carrying(g, net.sessionId) < 0 && !ATTRACT ? grabbable(g) : -1;
+  grabRing.visible = gi >= 0;
+  if (gi >= 0) { grabRing.position.set(g.items[gi][0], 0.05, g.items[gi][1]); grabRing.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
+  arrow.visible = carrying(g, net.sessionId) >= 0 && !ATTRACT;
+  if (arrow.visible) { const a = Math.atan2(RAMP.x - me.x, RAMP.z - me.z); arrow.position.set(me.x + Math.sin(a) * 1.3, 0.25, me.z + Math.cos(a) * 1.3); arrow.rotation.y = a; }
+  // The day: the light fades toward dusk; the ship lands, then lifts off.
+  const prog = g.phase === "day" ? Math.min(1, Math.max(0, (Date.now() - g.startAt) / CONFIG.dayMs)) : g.phase === "land" ? 0 : 1;
+  sky.intensity = CONFIG.ambient * (1 - CONFIG.duskDark * prog);
+  scene.background.copy(SKY_NOON).lerp(SKY_DUSK, prog); scene.fog.color.copy(scene.background);
+  const since = (Date.now() - g.phaseAt) / 1000;
+  ship.position.y = g.phase === "land" ? Math.max(0, 8 * (1 - since / (CONFIG.landMs / 1000))) : g.phase === "leave" || g.phase === "over" ? Math.min(30, since * since * 3) : 0;
+  ship.userData.beacon.material.opacity = 0.4 + 0.6 * (Math.sin(t * 6) > 0 ? 1 : 0);
+  padMark.material.opacity = 0.45 + 0.3 * Math.sin(t * 3);
+  for (const l of lamps) l.material.opacity = 0.45 + 0.1 * Math.sin(t * 2 + l.position.x);
+  for (let i = bits.length - 1; i >= 0; i--) {
+    const b = bits[i]; b.life -= dt; b.vy -= 6 * dt; b.s.position.x += b.vx * dt; b.s.position.y = Math.max(0.05, b.s.position.y + b.vy * dt); b.s.position.z += b.vz * dt;
+    b.s.material.opacity = Math.max(0, b.life); if (b.life <= 0) { scene.remove(b.s); bits.splice(i, 1); }
+  }
+  // Camera: high and behind you; when you're dead it follows a living crewmate. ?attract follows the action.
+  let focus = me;
+  if (g.dead[net.sessionId] && !ATTRACT) { const alive = people().filter((c) => !g.dead[c.id] && !c.mine)[0]; if (alive) focus = alive; }
+  if (ATTRACT) { // follow a crewmate near a monster (or carrying scrap)
+    const crew = people().filter((c) => !g.dead[c.id]), score = (c) => Math.min(...mons.map((m) => dist(m, c))) - (carrying(g, c.id) >= 0 ? 4 : 0);
+    const star = crew.sort((a, b) => score(a) - score(b))[0];
+    if (star) { const m = mons.slice().sort((a, b) => dist(a, star) - dist(b, star))[0], k = m && dist(m, star) < 9 ? 0.35 : 0; focus = { x: star.x + ((m ? m.x : star.x) - star.x) * k, z: star.z + ((m ? m.z : star.z) - star.z) * k }; }
+  }
+  const tall = camera.aspect < 1, hgt = ATTRACT ? 11 : tall ? 24 : 15, back = ATTRACT ? 7 : tall ? 11 : 9;
+  camLook.lerp(new THREE.Vector3(focus.x, 0, focus.z), 1 - Math.pow(ATTRACT ? 0.25 : 0.02, dt));
+  camPos.set(camLook.x, hgt, camLook.z + back);
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(new THREE.Vector3((Math.random() - 0.5) * shake, 0, (Math.random() - 0.5) * shake));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  if (now - lastHud > 120) { lastHud = now; hud(g); fixColor(); }
+}
+
+(async function start() {
+  net = await connect();
+  me.id = net.sessionId;
+  net.onState((st) => { S = st; });
+  net.on("grab", (msg, from) => { if (isHost() && msg) applyGrab(from, +msg.i); });
+  net.on("drop", (msg, from) => { if (isHost() && msg) applyDrop(from, +msg.x, +msg.z); });
+  net.on("again", () => { const g = game(); if (isHost() && g && g.phase === "over") host.again = true; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...shared("bots", []).map((b) => b.c)]);
+  myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  camLook.set(me.x, 0, me.z);
+  if (PARAMS.has("test")) window.__test = { game, writeGame, people, me, host, isHost, monList, botList, input };
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

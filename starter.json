@@ -1,0 +1,21 @@
+{
+  "name": "Scrap Haul",
+  "genre": "horror",
+  "dim": "3D",
+  "mode": "Co-op",
+  "players": "1–4",
+  "hook": "Grab the scrap. Make quota. Don’t look away.",
+  "how": "Your crew lands at a dead facility to haul scrap back to the ship before it leaves at dusk. Heavy loot pays more but slows you down. Keep your flashlight on the pale one, walk quietly past the blind one, and remember: whoever dies drops their loot.",
+  "controls": "WASD to walk, mouse to aim the flashlight, E or click to grab and drop, Shift to run, F for the light, or the touch stick and buttons",
+  "uses": [
+    ["Host-run rules", "The host's browser runs the day clock, the monsters and who picks up what; if it leaves, the next player takes over."],
+    ["Bots", "Bot crewmates scavenge, haul and run from monsters until friends join."],
+    ["Rounds", "Each day lands, ends and checks the quota together for everyone."],
+    ["Leaderboard", "The most scrap a crew hauled before getting fired."]
+  ],
+  "ideas": [
+    "Add a shop on the ship to buy a better flashlight",
+    "Make a monster that mimics a crewmate",
+    "Add a rainy day where the Hound hears twice as far"
+  ]
+}
