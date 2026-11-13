@@ -32,6 +32,7 @@
   .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffb340; text-align: left; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
   .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li.note { list-style: none; margin-left: -24px; opacity: .8; } /* a status line, not a numbered entry */
   .card p { margin: 6px 0 0; font-size: 14px; opacity: .85; }
   button.go { margin-top: 16px; width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ffb340; color: #2a1600; font: 800 17px system-ui, sans-serif; cursor: pointer; }
   .pad { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: flex-end; }
@@ -56,7 +57,7 @@
 <div class="pad" id="pad" hidden><button data-k="light" class="on">LIGHT</button><button data-k="run">RUN</button><button data-k="grab">GRAB</button></div>
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><p id="overLine"></p>
-  <div id="overBoard"><h3>Most scrap hauled</h3><ol id="board"><li>Loading…</li></ol>
+  <div id="overBoard"><h3>Most scrap hauled</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button class="go" id="again">Play again</button></div>
   <p id="next"></p>
 </div></div>
@@ -259,17 +260,19 @@ function canSee(a, b) {
   return true;
 }
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-/** A walkable route from a to b as tile centres (ending at b), or [] if there is none. */
-function route(a, b) {
+/** A walkable route from a to b as tile centres (ending at b), or [] if there is none.
+ *  `avoid` [{x, z, r}]: tiles closer than r to one of these are off limits (bots steer around the Hound). */
+function route(a, b, avoid = []) {
   const sx = toCell(a.x), sz = toCell(a.z), gx = toCell(b.x), gz = toCell(b.z), goal = gx + gz * MW;
   if (solid(gx, gz)) return [];
+  const near = (x, z) => avoid.some((o) => Math.hypot((x + 0.5) * TS - o.x, (z + 0.5) * TS - o.z) < o.r);
   const prev = new Int32Array(MW * MH).fill(-1), q = [sx + sz * MW];
   prev[q[0]] = q[0];
   for (let h = 0; h < q.length && prev[goal] < 0; h++) {
     const k = q[h], x = k % MW, z = (k / MW) | 0;
     for (const [dx, dz] of DIRS) {
       const nx = x + dx, nz = z + dz, n = nx + nz * MW;
-      if (solid(nx, nz) || prev[n] >= 0 || (dx && dz && (solid(x + dx, z) || solid(x, z + dz)))) continue;
+      if (solid(nx, nz) || prev[n] >= 0 || (dx && dz && (solid(x + dx, z) || solid(x, z + dz))) || (avoid.length && near(nx, nz))) continue;
       prev[n] = k; q.push(n);
     }
   }
@@ -551,7 +554,7 @@ function adopt() {
   if (!host.mons.length && game()) spawnMonsters(game().day, game().seed);
 }
 function botList() {
-  if (isHost() && host.was) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.name, c: b.color, x: b.x, z: b.z, h: b.h, mv: b.mv ? 1 : 0, r: b.r ? 1 : 0 })); // host.was: adopted (not leftovers from an earlier turn as host)
+  if (isHost() && host.was) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.name, c: b.color, x: b.x, z: b.z, h: b.h, mv: b.mv ? 1 : 0, r: b.r ? 1 : 0, l: b.light === false ? 0 : 1 })); // host.was: adopted (not leftovers from an earlier turn as host)
   return shared("bots", []);
 }
 function monList() { return isHost() && host.was ? host.mons : shared("mons", []); }
@@ -567,7 +570,7 @@ function people() {
     const q = posOf(id, p);
     if (live.has(id) && q) out.push({ id, name: p.n || "Player", color: p.c || "#ccc", x: q.x, z: q.z, h: q.h, light: !!q.l, noise: q.m || 0 });
   }
-  for (const b of botList()) out.push({ id: b.i, name: b.n, color: b.c, x: b.x, z: b.z, h: b.h, light: true, noise: b.r ? 2 : b.mv ? 1 : 0, bot: true });
+  for (const b of botList()) out.push({ id: b.i, name: b.n, color: b.c, x: b.x, z: b.z, h: b.h, light: b.l !== 0, noise: b.r ? 2 : b.mv ? 1 : 0, bot: true });
   return out;
 }
 
@@ -703,6 +706,11 @@ function crawlerTick(m, dt, up, t) {
   if (m.s !== "c" && m.goal && dist(m, m.goal) < 0.8) m.goal = null;
 }
 
+/** A Hound near enough to hear this crewmate walk (heavy scrap is louder), or rushing at a noise right by them. */
+function houndNear(b, G) {
+  const ci = carrying(G, b.id), H = CONFIG.hound, r = (ci >= 0 && KINDS[G.items[ci][2]].heavy ? H.hearHeavy : H.hearWalk) + 1.5;
+  return host.mons.find((m) => m.k === "H" && m.s !== "e" && (dist(m, b) < r || (m.s === "r" && (dist(m, b) < 6 || (m.goal && dist(m.goal, b) < 4)))));
+}
 /** Bot crewmates (and your own player in ?attract): scavenge, haul to the ship, flee monsters. */
 function botsTick(dt, G, all, t) {
   let dirty = false;
@@ -711,7 +719,7 @@ function botsTick(dt, G, all, t) {
   for (const b of agents) {
     b.mv = b.r = false;
     if (G.dead[b.id] || G.phase !== "day") continue;
-    if (t > b.think) { b.think = t + 300 + Math.random() * 250; dirty = botThink(b, G, t) || dirty; }
+    if (t > b.think || (b.mode !== "hide" && houndNear(b, G))) { b.think = t + 300 + Math.random() * 250; dirty = botThink(b, G, t) || dirty; } // a Hound in earshot: think (and freeze) at once
     const ci = carrying(G, b.id), heavy = ci >= 0 && KINDS[G.items[ci][2]].heavy, fast = b.mode === "flee";
     const speed = (b === me ? (fast ? CONFIG.run : CONFIG.walk) : fast ? CONFIG.botRun : CONFIG.botWalk) * (ci < 0 ? 1 : heavy ? CONFIG.heavySlow : CONFIG.lightSlow);
     if (follow(b, speed, dt)) { b.mv = true; b.r = fast; }
@@ -729,10 +737,12 @@ function botThink(b, G, t) {
   for (const m of mons) {
     const d = dist(m, b);
     if (m.s === "e") continue;
-    if (m.k === "W" && d < 11 && canSee(b, m)) { b.stare = m; if (d < 4) threat = m; }
-    else if (m.k === "H" && d < (m.s === "r" ? 9 : 4.5)) threat = m;
+    if (m.k === "W" && d < 11 && canSee(b, m)) { b.stare = m; if (d < 4 && m.s !== "f") threat = m; } // a frozen Watcher in your light is no threat
+    else if (m.k === "H" && m === houndNear(b, G)) threat = m;
     else if (m.k === "C" && ((m.s === "c" && m.tgt === b.id) || (d < 6 && canSee(m, b)))) threat = m;
   }
+  // Flashlight off while a Crawler is near (it sees a lit one from much farther), unless the Watcher needs it.
+  b.light = !!b.stare || !mons.some((m) => m.k === "C" && m.s !== "e" && dist(m, b) < CONFIG.crawler.sight + 3);
   let mode = "scav", goal = null;
   if (threat) {
     mode = "flee";
@@ -749,9 +759,12 @@ function botThink(b, G, t) {
     else goal = { x: RAMP.x + (Math.random() - 0.5) * 4, z: RAMP.z + 1.5 };
   }
   if (mode !== "fetch") b.tgtI = -1;
-  const same = b.goal && b.mode === mode && toCell(goal.x) === toCell(b.goal.x) && toCell(goal.z) === toCell(b.goal.z) && b.path.length;
+  // Walk around the Hound's earshot (it can't hear you there), re-planned while one is close.
+  const hounds = mons.filter((m) => m.k === "H" && m.s !== "e"), H = CONFIG.hound;
+  const avoid = hounds.map((m) => ({ x: m.x, z: m.z, r: (ci >= 0 && KINDS[G.items[ci][2]].heavy ? H.hearHeavy : H.hearWalk) + 1.5 }));
+  const same = b.goal && b.mode === mode && toCell(goal.x) === toCell(b.goal.x) && toCell(goal.z) === toCell(b.goal.z) && b.path.length && !hounds.some((m) => dist(m, b) < 14);
   b.mode = mode; b.goal = goal;
-  if (!same) b.path = route(b, goal);
+  if (!same) { b.path = route(b, goal, avoid); if (!b.path.length) b.path = route(b, goal); }
   return dirty;
 }
 
@@ -870,11 +883,11 @@ function hud(g) {
 }
 function showBoard(g) {
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  if (!board) { list.innerHTML = "<li class=\"note\">Leaderboards need a connection.</li>"; return; }
   const submit = me.runId === g.id && g.total > 0 ? board.submit(g.total).catch(() => null) : Promise.resolve();
   submit.then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>$${e.score}</span></li>`).join("") : "<li>No hauls yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>$${e.score}</span></li>`).join("") : "<li class=\"note\">No hauls yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class=\"note\">Couldn't load the leaderboard.</li>"; });
 }
 /** Keep a color nobody else has: the later sessionId gives way, and the bots' colors count as taken. */
 function fixColor() {
@@ -925,6 +938,7 @@ cv.addEventListener("pointermove", (e) => {
     stick.x = dx * k; stick.y = dy * k; $("stick").firstElementChild.style.transform = `translate(${stick.x * 35}px, ${stick.y * 35}px)`;
   }
 });
+cv.addEventListener("contextmenu", (e) => e.preventDefault()); // right-click never opens the browser menu
 cv.addEventListener("pointerdown", (e) => {
   e.preventDefault(); unlockAudio();
   if (e.pointerType === "mouse" && e.button === 0) input.grab = true; // a click grabs too
@@ -982,7 +996,7 @@ function frame(now) {
     const v = viewOf(id, p.c || "#ccc", p.n || "Player"); seen.add(id); ease(v, q.x, q.z, q.h, dt);
     drawn.push({ v, light: !!q.l, id, noise: q.m || 0 });
   }
-  for (const b of botList()) { const v = viewOf(b.i, b.c, b.n); seen.add(b.i); ease(v, b.x, b.z, b.h, dt); drawn.push({ v, light: true, id: b.i, noise: b.r ? 2 : b.mv ? 1 : 0 }); }
+  for (const b of botList()) { const v = viewOf(b.i, b.c, b.n); seen.add(b.i); ease(v, b.x, b.z, b.h, dt); drawn.push({ v, light: b.l !== 0, id: b.i, noise: b.r ? 2 : b.mv ? 1 : 0 }); }
   for (const [id, v] of views) if (!seen.has(id)) { scene.remove(v.g); views.delete(id); }
   if (!me.g) me.g = makeCrew(myColor, "");
   me.g.position.set(me.x, 0, me.z); me.g.rotation.y = me.h;
