@@ -91,7 +91,7 @@
  *     The host's browser runs the monsters, the day clock and the bots. A new host adopts
  *     all three from state and carries on.
  *   - Intents to the host: "grab" {i} (the host checks you are next to it and free-handed),
- *     "drop" {x, z} (puts what you carry on the floor: the noise draws the Hound), "again".
+ *     "drop" {x, z} (puts what you carry on the floor: the noise draws the Hound), "again" {id}.
  *     Banking scrap at the ship and dying are decided by the host from everyone's positions.
  *     A dead player's scrap drops where they fell.
  *   - A new day starts when the host bumps game.day; a new run when it bumps game.id. Every
@@ -637,7 +637,8 @@ function fillBots(G) {
 /** Someone got caught: they die for the rest of the day and their scrap drops where they fell. */
 function kill(G, c, m, t) {
   G.dead[c.id] = m.k;
-  for (const it of G.items) if (it[4] === c.id) Object.assign(it, { 0: r1(c.x), 1: r1(c.z + 0.6), 4: "" });
+  const z = wallAt(c.x, c.z + 0.6) ? c.z : c.z + 0.6; // just in front of them, unless that is inside a wall
+  for (const it of G.items) if (it[4] === c.id) Object.assign(it, { 0: r1(c.x), 1: r1(z), 4: "" });
   Object.assign(m, { s: "e", until: t + CONFIG.eatMs, goal: null, path: [], tgt: "" });
   host.noises.push({ x: c.x, z: c.z, at: t, r: CONFIG.hound.hearDrop });
 }
@@ -701,7 +702,7 @@ function crawlerTick(m, dt, up, t) {
   if (!m.goal) { m.goal = SCRAP_SPOTS[Math.floor(Math.random() * SCRAP_SPOTS.length)]; m.think = 0; }
   if (t > m.think || !m.path.length) { m.think = t + (m.s === "c" ? 300 : 900); m.path = route(m, m.goal); if (!m.path.length && m.s !== "c") m.goal = null; }
   const speed = m.s === "c" ? C.chase : C.patrol;
-  if (seen && sd < 2.5) { const dx = seen.x - m.x, dz = seen.z - m.z; m.x += (dx / sd) * speed * dt; m.z += (dz / sd) * speed * dt; m.h = Math.atan2(dx, dz); }
+  if (seen && sd < 2.5) { const dx = seen.x - m.x, dz = seen.z - m.z; moveBody(m, (dx / sd) * speed * dt, (dz / sd) * speed * dt); m.h = Math.atan2(dx, dz); } // close: straight at them (but not through a crate)
   else follow(m, speed, dt);
   if (m.s !== "c" && m.goal && dist(m, m.goal) < 0.8) m.goal = null;
 }
@@ -830,7 +831,8 @@ function applyGrab(id, i) {
 function applyDrop(id, x, z) {
   const g = game(), ci = carrying(g, id), who = people().find((c) => c.id === id);
   if (!g || ci < 0) return;
-  if (!who || Math.hypot(x - who.x, z - who.z) > 3) { x = who ? who.x : x; z = who ? who.z : z; }
+  if (!who) return;
+  if (!(Math.hypot(x - who.x, z - who.z) <= 3)) { x = who.x; z = who.z; } // not a number, or not where you stand: it drops at your feet
   const G = clone(g); Object.assign(G.items[ci], { 0: r1(x), 1: r1(z), 4: "" }); writeGame(G);
   host.noises.push({ x, z, at: Date.now(), r: CONFIG.hound.hearDrop * (KINDS[G.items[ci][2]].heavy ? 1 : 0.6) });
 }
@@ -897,7 +899,7 @@ function fixColor() {
   myColor = COLORS.find((c) => !used.has(c)) || myColor;
   net.me.set("c", myColor); if (me.g) me.g.userData.mat.color.set(myColor);
 }
-$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+$("again").onclick = () => { const g = game(); if (isHost()) host.again = true; else if (g) net.send("again", { id: g.id }); };
 
 /** One-off effects worked out from what changed in state (so nobody misses one). */
 let prevG = null, sirenFor = "";
@@ -1074,7 +1076,7 @@ function frame(now) {
   net.onState((st) => { S = st; });
   net.on("grab", (msg, from) => { if (isHost() && msg) applyGrab(from, +msg.i); });
   net.on("drop", (msg, from) => { if (isHost() && msg) applyDrop(from, +msg.x, +msg.z); });
-  net.on("again", () => { const g = game(); if (isHost() && g && g.phase === "over") host.again = true; });
+  net.on("again", (msg) => { const g = game(); if (isHost() && g && g.phase === "over" && msg && msg.id === g.id) host.again = true; }); // only for the run that just ended
   net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
   net.onReconnect(() => { dropped = false; });
   if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
